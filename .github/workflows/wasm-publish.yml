@@ -54,12 +54,17 @@ jobs:
       - name: Configure package for GitHub registry
         working-directory: jaq-play/pkg
         run: |
-          # Extract version from git tag (remove 'v' prefix)
-          VERSION="${GITHUB_REF_NAME#v}"
+          # Extract version from git tag (remove 'v' prefix), or fallback to jaq/Cargo.toml
+          if [[ "$GITHUB_REF_NAME" =~ ^v[0-9] ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION=$(grep '^version' ../../jaq/Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          fi
+          echo "Using version: $VERSION"
           # Update package.json for GitHub npm registry
           node -e "
             const pkg = require('./package.json');
-            pkg.version = '${VERSION}' || pkg.version;
+            pkg.version = '${VERSION}';
             pkg.publishConfig = {
               registry: 'https://npm.pkg.github.com'
             };
