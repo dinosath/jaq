@@ -1,0 +1,76 @@
+name: Build and Publish WASM Package
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v[0-9]*"
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  SCOPE: ${{ github.repository_owner }}
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Restore cached Cargo registry
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+          key: cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          target: wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --locked
+
+      - name: Build WASM package with TypeScript
+        working-directory: jaq-play
+        run: wasm-pack build --target web --release --scope ${{ env.SCOPE }}
+
+      - name: Copy LICENSE file
+        run: cp LICENSE-MIT jaq-play/pkg/LICENSE
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://npm.pkg.github.com'
+          scope: '@${{ env.SCOPE }}'
+
+      - name: Configure package for GitHub registry
+        working-directory: jaq-play/pkg
+        run: |
+          # Extract version from git tag (remove 'v' prefix)
+          VERSION="${GITHUB_REF_NAME#v}"
+          # Update package.json for GitHub npm registry
+          node -e "
+            const pkg = require('./package.json');
+            pkg.version = '${VERSION}' || pkg.version;
+            pkg.publishConfig = {
+              registry: 'https://npm.pkg.github.com'
+            };
+            pkg.files = pkg.files || [];
+            if (!pkg.files.includes('LICENSE')) pkg.files.push('LICENSE');
+            require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2));
+          "
+          cat package.json
+
+      - name: Publish to GitHub Packages
+        working-directory: jaq-play/pkg
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
